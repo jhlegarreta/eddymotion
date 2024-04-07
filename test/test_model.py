@@ -91,6 +91,47 @@ def test_average_model():
     assert np.all(tmodel_2000.predict([0, 0, 0]) == 1100)
 
 
+def test_gp_model():
+
+    import nibabel as nib
+    # ToDo
+    # Transition to the HDF5 format eventually
+    root_path = "nireports/nireports/tests/data"
+    fname_dwi = root_path + "/ds000114_sub-01_ses-test_desc-trunc_dwi.nii.gz"
+    fname_bval = root_path + "/ds000114_sub-01_ses-test_desc-trunc_dwi.bval"
+    fname_bvec = root_path + "/ds000114_sub-01_ses-test_desc-trunc_dwi.bvec"
+    dwi = nib.load(fname_dwi)
+    bvecs = np.loadtxt(fname_bvec).T
+    bvals = np.loadtxt(fname_bval)
+    b0s_mask = bvals < 50
+    gradients = np.hstack([bvecs[~b0s_mask], bvals[~b0s_mask, None]])
+    # ToDo: what if we are in the multi-shell case ?
+    # Assume single shell case for now
+    num_gradients = 1
+    # a = np.zeros(num_gradients)  # acquisition parameters
+    # h = nib.load()  # Susceptibility induced off‐resonance field (Hz)
+    # ToDo
+    # Provide proper values/estimates for these
+    a = 1
+    h = 1  # should be a nifti image
+
+    # ToDo
+    # Build kernel properly
+    kernel = np.ones(20)
+
+    num_iterations = 5
+    gp = model.GaussianProcessModel(dwi=dwi, a=a, h=h, kernel=kernel, num_iterations=num_iterations)
+
+    _dwi = dwi[..., ~b0s_mask]
+
+    lovo_index = 5
+    train_idx = range(len(bvals)) != lovo_index
+    data_train = _dwi[..., train_idx]
+    data_train = _dwi
+    gp.fit(data_train[0], data_train[1])
+    predicted1 = gp.predict(data_test[1])
+
+
 def test_two_initialisations(datadir):
     """Check that the two different initialisations result in the same models"""
 
