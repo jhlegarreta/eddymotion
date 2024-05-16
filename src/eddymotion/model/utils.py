@@ -149,13 +149,31 @@ def calculate_angle_matrix(bvecs):
     # What if whe have different bvals ?
     # Note that the double loops assume bvecs is a 2D array
 
-    n = len(bvecs)
-    angle_mat = np.zeros((n, n))
+    # Check if bvecs is a NumPy array, list, or pandas DataFrame
+    if isinstance(bvecs, list):
+        bvecs = np.array(bvecs)
+    elif isinstance(bvecs, pd.DataFrame):
+        bvecs = bvecs.to_numpy()
+    elif not isinstance(bvecs, np.ndarray):
+        raise ValueError("Input bvecs must be a NumPy array, list, or pandas DataFrame")
 
+    # Check the dimensions of bvecs
+    if bvecs.shape[0] != 3:
+        if bvecs.shape[1] == 3:
+            bvecs = bvecs.T
+        else:
+            raise ValueError("bvecs must be of shape (3, n) or (n, 3)")
+
+    n = bvecs.shape[1]
+    angle_mat = np.zeros((n, n))
+    
     for j in range(n):
         for i in range(j, n):
-            angle_mat[i, j] = np.arccos(min(1.0, abs(np.dot(bvecs[i], bvecs[j]))))
-
+            dot_product = np.dot(bvecs[:, i], bvecs[:, j])
+            dot_product = min(1.0, max(-1.0, dot_product))  # Clamp the value to be within [-1, 1]
+            angle_mat[i, j] = np.arccos(np.abs(dot_product))
+            angle_mat[j, i] = angle_mat[i, j]
+            
     return angle_mat
 
 
