@@ -278,12 +278,11 @@ def compute_squared_exponential_function(grpi, grpb, l):
 # ToDo
 # Long-term: generalize this so that the loop block can be put into a function
 # and be called from the single-shell and multi-shell
-def compute_single_shell_covariance_matrix(k, angle_mat, grpi, ngrp, thpar):
+def compute_single_shell_covariance_matrix(angle_mat, grpi, ngrp, thpar):
     """Compute single-shell covariance.
     SphericalKMatrix::calculate_K_matrix"""
 
-    if k.shape[0] != angle_mat.shape[0]:
-        k = np.zeros_like(angle_mat)
+    k = np.zeros_like(angle_mat)
 
     # Compute angular covariance
     # ToDo
@@ -297,7 +296,7 @@ def compute_single_shell_covariance_matrix(k, angle_mat, grpi, ngrp, thpar):
 
             # eq. 10 in [Andersson15]_
             if a > theta:
-                k[i+1, j+1] = sm * (1.0 - 1.5 * theta / a + 0.5 * (theta ** 3) / (a ** 3))
+                k[i+1, j+1] = sm * compute_spherical_function(theta, a)
             else:
                 k[i+1, j+1] = 0.0
             if i == j:
