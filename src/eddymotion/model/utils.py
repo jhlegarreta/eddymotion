@@ -301,7 +301,7 @@ def compute_single_shell_covariance_matrix(angle_mat, grpi, ngrp, thpar):
                 k[i+1, j+1] = 0.0
             if i == j:
                 k[i+1, j+1] += thpar[pindx + 2]
-
+    return k
 
 def compute_multi_shell_covariance_matrix1(k, thpar, grpb, grpi):
     """Compute multi-shell covariance.
