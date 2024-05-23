@@ -486,7 +486,7 @@ class GaussianProcessModel:
         self._r = 0
         self._kernel = kernel
 
-    def fit(self, gradient_directions, data, initial_beta, batch_size=1000, max_iter=1000, tolerance=1e-4, patience=20):
+    def fit(self, gradient_directions, data, initial_beta=np.log([100.0, 0.2, 10.0]), batch_size=1000, max_iter=1000, tolerance=1e-4, patience=20):
         """
         Fit the Gaussian Process model to the training data.
 
@@ -516,7 +516,7 @@ class GaussianProcessModel:
         print(f'Gradient directions shape: {reshaped_angles.shape}')
 
         # Run the stochastic optimization with early stopping
-        optimal_beta = stochastic_optimization_with_early_stopping(initial_beta, voxel_intensities_flatten, angles, batch_size, max_iter, patience, tolerance)
+        optimal_beta = stochastic_optimization_with_early_stopping(initial_beta, voxel_intensities_flatten, angles, batch_size=batch_size, max_iter=max_iter, patience=patience, tolerance=tolerance)
         optimal_lambda, optimal_a, optimal_sigma_sq = np.exp(optimal_beta)
 
         # Update the kernel with the optimized hyperparameters

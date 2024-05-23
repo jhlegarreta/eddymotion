@@ -24,6 +24,7 @@ import numpy as np
 from dipy.core.gradients import get_bval_indices
 from sklearn.cluster import KMeans
 from sklearn.gaussian_process.kernels import Kernel
+from scipy.optimize import minimize, Bounds
 
 B0_THRESHOLD = 50  # from dmriprep
 SHELL_DIFF_THRES = 20  # 150 in dmriprep
@@ -231,7 +232,15 @@ def stochastic_optimization_with_early_stopping(initial_beta, data, angles, batc
     beta = initial_beta
     best_loss = float('inf')
     no_improve_count = 0
-    num_voxels = data.shape[1]  # Updated to match the new shape
+    num_voxels = data.shape[1]
+    lambda_upper = 1e4
+    lambda_lower = 1e-6
+    a_upper = np.pi
+    a_lower = 1e-6
+    sigma_sq_upper = 1e4
+    sigma_sq_lower = 1e-6
+
+    bounds = Bounds(np.log([lambda_lower, a_lower, sigma_sq_lower]), np.log([lambda_upper, a_upper, sigma_sq_upper]))
 
     for iteration in range(max_iter):
         batch_indices = np.random.choice(num_voxels, size=batch_size, replace=False)
