@@ -25,9 +25,11 @@
 import warnings
 
 import numpy as np
-import sklearn
 from dipy.core.gradients import gradient_table
 from joblib import Parallel, delayed
+from sklearn.gaussian_process import GaussianProcessRegressor
+
+from utils import compute_angle, spherical_covariance, stochastic_optimization_with_early_stopping
 
 
 def _exec_fit(model, data, chunk=None):
@@ -242,6 +244,7 @@ class AverageDWModel:
         r"""
         Implement object initialization.
 
+import sklearn
         Parameters
         ----------
         gtab : :obj:`~numpy.ndarray`
@@ -471,46 +474,66 @@ class GaussianProcessModel:
     detection and replacement into a non-parametric framework for movement and
     distortion correction of diffusion MR images, NeuroImage 141 (2016) 556–572
     """
-
     __slots__ = ("_dwi", "_a", "_h", "_kernel", "_num_iterations", "_betas", "_r", "_gpr")
 
     def __init__(self, dwi, a, h, kernel, num_iterations=5, **kwargs):
         """Implement object initialization."""
-
-        # ToDo
-        # This should be he HDF5 file dwi object, so that we avoid having the
-        # entire 4D volume in memory
         self._dwi = dwi
         self._a = a
         self._h = h
         self._num_iterations = num_iterations
-
-        # Initialize
         self._betas = 0
         self._r = 0
-
-        # ToDo
-        # Build the GP kernel here or in fit ?
-        # self._gpr = None
-        # Does the kernel depend on which data we use as the training data (i.e.
-        # varies with the index we choose to predict)?
         self._kernel = kernel
 
-    def fit(self, *args, **kwargs):
-        """The x are our gradient directions; the observations are our diffusion
-        volumes.
-        X_train: array-like of shape (n_samples, n_features), n_samples being
-        the number of gradients, and the n_features the number of shells ?
-        y_train_array-like of shape (n_samples,) or (n_samples, n_targets)"""
+    def fit(self, gradient_directions, data, initial_beta, batch_size=1000, max_iter=1000, tolerance=1e-4, patience=20):
+        """
+        Fit the Gaussian Process model to the training data.
 
-        self._gpr = sklearn.gaussian_process.GaussianProcessRegressor(kernel=self._kernel)
-        self._gpr.fit(X_train, y_train)
+        Parameters
+        ----------
+        gradient_directions : array-like of shape (num_directions, 3)
+            Training data (gradient directions).
+        voxel_intensities : array-like of shape (num_directions, num_voxels)
+            Target values (diffusion volumes).
+        initial_beta : array-like of shape (3,)
+            Initial guess for the log-transformed hyperparameters.
+        batch_size : int, default=1000
+            Size of the mini-batches for optimization.
+        max_iter : int, default=1000
+            Maximum number of iterations.
+        tolerance : float, default=1e-4
+            Tolerance for improvement in loss.
+        patience : int, default=20
+            Patience for early stopping.
+        """
+        # Compute angles from the gradient directions
+        angles = compute_angle(gradient_directions)
+
+        voxel_intensities_flatten = data.reshape(len(angles), -1)
+        reshaped_angles = angles.reshape(-1, 1)
+        print(f'Voxel intensities shape: {voxel_intensities_flatten.shape}')
+        print(f'Gradient directions shape: {reshaped_angles.shape}')
+
+        # Run the stochastic optimization with early stopping
+        optimal_beta = stochastic_optimization_with_early_stopping(initial_beta, voxel_intensities_flatten, angles, batch_size, max_iter, patience, tolerance)
+        optimal_lambda, optimal_a, optimal_sigma_sq = np.exp(optimal_beta)
+
+        # Update the kernel with the optimized hyperparameters
+        self._kernel.set_params(lambda_=optimal_lambda, a=optimal_a, sigma_sq=optimal_sigma_sq)
+
+        # Fit the Gaussian Process Regressor with the optimized kernel
+        self._gpr = GaussianProcessRegressor(kernel=self._kernel)
+        self._gpr.fit(reshaped_angles, voxel_intensities_flatten)  # Here there is a problem with the shape of the data
+
+        print("\nOptimal hyperparameters:")
+        print("Lambda:", optimal_lambda)
+        print("a:", optimal_a)
+        print("Sigma squared:", optimal_sigma_sq)
 
     def predict(self, gradient, **kwargs):
         """Return the Gaussian Process prediction according to [Andersson16]_"""
-        # ToDo
-        # Call self._gprlog_marginal_likelihood for eq. 12 in Andersson 15 ?
-        y_mean, y_std = self._gpr.predict(X, return_std=True)
+        y_mean, y_std = self._gpr.predict(gradient, return_std=True)
         return y_mean, y_std
 
 

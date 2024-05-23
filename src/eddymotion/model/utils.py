@@ -23,10 +23,240 @@
 import numpy as np
 from dipy.core.gradients import get_bval_indices
 from sklearn.cluster import KMeans
+from sklearn.gaussian_process.kernels import Kernel
 
 B0_THRESHOLD = 50  # from dmriprep
 SHELL_DIFF_THRES = 20  # 150 in dmriprep
 
+
+class SphericalCovarianceKernel(Kernel):
+    """
+    Custom kernel based on spherical covariance function.
+
+    Parameters
+    ----------
+    lambda_ : float, default=1.0
+        Scale parameter for the covariance function.
+    a : float, default=1.0
+        Distance parameter where the covariance function goes to zero.
+    sigma_sq : float, default=1.0
+        Noise variance term.
+    """
+    def __init__(self, lambda_=1.0, a=1.0, sigma_sq=1.0):
+        self.lambda_ = lambda_
+        self.a = a
+        self.sigma_sq = sigma_sq
+
+    def __call__(self, X, Y=None):
+        """
+        Compute the kernel matrix.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Input data.
+        Y : array-like of shape (n_samples, n_features), optional
+            If None, Y = X.
+
+        Returns
+        -------
+        K : array-like of shape (n_samples, n_samples)
+            Kernel matrix.
+        """
+        if Y is None:
+            Y = X
+        theta = np.abs(X[:, None] - Y[None, :])
+        K = np.where(theta <= self.a, 1 - 3 * (theta / self.a) ** 2 + 2 * (theta / self.a) ** 3, 0)
+        return self.lambda_ * K + self.sigma_sq * np.eye(len(X))
+
+    def diag(self, X):
+        """
+        Returns the diagonal of the kernel matrix.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Input data.
+
+        Returns
+        -------
+        array-like of shape (n_samples,)
+            Diagonal of the kernel matrix.
+        """
+        return np.full(X.shape[0], self.lambda_ + self.sigma_sq)
+
+    def is_stationary(self):
+        """
+        Returns whether the kernel is stationary.
+
+        Returns
+        -------
+        bool
+            True if the kernel is stationary.
+        """
+        return True
+
+    def get_params(self, deep=True):
+        """
+        Get parameters of the kernel.
+
+        Parameters
+        ----------
+        deep : bool, default=True
+            Whether to return the parameters of the contained subobjects.
+
+        Returns
+        -------
+        params : dict
+            Parameter names mapped to their values.
+        """
+        return {"lambda_": self.lambda_, "a": self.a, "sigma_sq": self.sigma_sq}
+
+    def set_params(self, **params):
+        """
+        Set parameters of the kernel.
+
+        Parameters
+        ----------
+        params : dict
+            Kernel parameters.
+
+        Returns
+        -------
+        self : object
+            Returns self.
+        """
+        self.lambda_ = params.get("lambda_", self.lambda_)
+        self.a = params.get("a", self.a)
+        self.sigma_sq = params.get("sigma_sq", self.sigma_sq)
+        return self
+
+
+def negative_log_likelihood(beta, y, angles_array, reg_param=1e-6):
+    """
+    Log marginal likelihood function with regularization.
+
+    Parameters
+    ----------
+    beta : array-like of shape (3,)
+        Log-transformed hyperparameters.
+    y : array-like of shape (n_samples,)
+        Observed data.
+    angles_array : array-like of shape (n_samples, n_features)
+        Pairwise angles between gradient directions.
+    reg_param : float, default=1e-6
+        Regularization parameter.
+
+    Returns
+    -------
+    float
+        Negative log marginal likelihood.
+    """
+    lambda_, a, sigma_sq = np.exp(beta)
+    kernel = SphericalCovarianceKernel(lambda_=lambda_, a=a, sigma_sq=sigma_sq)
+    K = kernel(angles_array)
+    log_likelihood = -0.5 * (np.dot(y.T, np.linalg.solve(K, y)) + np.linalg.slogdet(K)[1] + len(y) * np.log(2 * np.pi))
+    regularization = reg_param * (np.sum(beta**2))
+    return -log_likelihood + regularization
+
+def total_negative_log_likelihood(beta, y_all, angles_array, reg_param=1e-6):
+    """
+    Total negative log marginal likelihood for all voxels processed in chunks.
+
+    Parameters
+    ----------
+    beta : array-like of shape (3,)
+        Log-transformed hyperparameters.
+    y_all : array-like of shape (n_samples, n_voxels)
+        Observed data for all voxels.
+    angles_array : array-like of shape (n_samples, n_features)
+        Pairwise angles between gradient directions.
+    reg_param : float, default=1e-6
+        Regularization parameter.
+
+    Returns
+    -------
+    float
+        Total negative log marginal likelihood.
+    """
+    total_log_likelihood = 0
+    for y in y_all.T:  # Iterate over voxels
+        total_log_likelihood += negative_log_likelihood(beta, y, angles_array, reg_param)
+    return total_log_likelihood
+
+def compute_angle(gradients):
+    """
+    Compute angles between gradient directions.
+
+    Parameters
+    ----------
+    gradients : array-like of shape (n_gradients, 3)
+        Gradient directions.
+
+    Returns
+    -------
+    angles : array-like of shape (n_gradients, n_gradients)
+        Pairwise angles between gradient directions.
+    """
+    gradient_vectors = gradients.T[:, :3]
+    angles = np.arccos(np.clip(np.abs(np.dot(gradient_vectors, gradient_vectors[0]) / (np.linalg.norm(gradient_vectors, axis=1) * np.linalg.norm(gradient_vectors[0]))), -1.0, 1.0))
+    return angles
+
+def stochastic_optimization_with_early_stopping(initial_beta, data, angles, batch_size, max_iter=10000, patience=100, tolerance=1e-4):
+    """
+    Stochastic Optimization with Early Stopping.
+
+    Parameters
+    ----------
+    initial_beta : array-like of shape (3,)
+        Initial guess for the log-transformed hyperparameters.
+    data : array-like of shape (n_samples, n_voxels)
+        Observed data for all voxels.
+    angles : array-like of shape (n_samples, n_features)
+        Pairwise angles between gradient directions.
+    batch_size : int
+        Size of the mini-batches for optimization.
+    max_iter : int, default=10000
+        Maximum number of iterations.
+    patience : int, default=100
+        Patience for early stopping.
+    tolerance : float, default=1e-4
+        Tolerance for improvement in loss.
+
+    Returns
+    -------
+    best_beta : array-like of shape (3,)
+        Optimized log-transformed hyperparameters.
+    """
+    beta = initial_beta
+    best_loss = float('inf')
+    no_improve_count = 0
+    num_voxels = data.shape[1]  # Updated to match the new shape
+
+    for iteration in range(max_iter):
+        batch_indices = np.random.choice(num_voxels, size=batch_size, replace=False)
+        batch_data = data[:, batch_indices]  # Updated to extract voxel data correctly
+        print(f'Batch data shape: {batch_data.shape}')
+
+        result = minimize(total_negative_log_likelihood, beta, args=(batch_data, angles), bounds=bounds, method='L-BFGS-B')
+        current_loss = result.fun
+
+        if iteration == 0 or current_loss < best_loss - tolerance:
+            best_loss = current_loss
+            best_beta = result.x
+            no_improve_count = 0
+        else:
+            no_improve_count += 1
+
+        if no_improve_count >= patience:
+            print(f"Early stopping at iteration {iteration + 1} due to no improvement")
+            break
+
+        beta = result.x
+        print(f'Iteration {iteration + 1}: Loss = {current_loss}')
+        print(f'Current hyperparameters: {np.exp(beta)}')
+
+    return best_beta
 
 def is_positive_definite(matrix):
     """Check whether the given matrix is positive definite. Any positive
