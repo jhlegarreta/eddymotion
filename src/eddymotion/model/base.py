@@ -29,7 +29,7 @@ from dipy.core.gradients import gradient_table
 from joblib import Parallel, delayed
 from sklearn.gaussian_process import GaussianProcessRegressor
 
-from .utils import compute_angle, SphericalCovarianceKernel, stochastic_optimization_with_early_stopping
+from .utils import calculate_angle_matrix, SphericalCovarianceKernel, stochastic_optimization_with_early_stopping
 
 
 def _exec_fit(model, data, chunk=None):
@@ -519,7 +519,7 @@ class GaussianProcessModel:
             Patience for early stopping.
         """
         # Compute angles from the gradient directions
-        angles = compute_angle(gradient_directions)
+        angles = calculate_angle_matrix(gradient_directions)
 
         voxel_intensities_flatten = data.reshape(len(angles), -1)
         reshaped_angles = angles.reshape(-1, 1)
@@ -535,7 +535,7 @@ class GaussianProcessModel:
 
         # Fit the Gaussian Process Regressor with the optimized kernel
         self._gpr = GaussianProcessRegressor(kernel=self._kernel)
-        self._gpr.fit(reshaped_angles, voxel_intensities_flatten)  # Here there is a problem with the shape of the data
+        self._gpr.fit(angles, voxel_intensities_flatten)  # Here there is a problem with the shape of the data
 
     def predict(self, gradient, **kwargs):
         """Return the Gaussian Process prediction according to [Andersson16]_"""
