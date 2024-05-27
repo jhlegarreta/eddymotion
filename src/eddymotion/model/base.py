@@ -474,6 +474,119 @@ class GaussianProcessModel:
     detection and replacement into a non-parametric framework for movement and
     distortion correction of diffusion MR images, NeuroImage 141 (2016) 556–572
     """
+
+    __slots__ = (
+        "_dwi",
+        "_a",
+        "_h",
+        "_kernel",
+        "_num_iterations",
+        "_betas",
+        "_r",
+        "_gpr",
+        "_model",
+    )
+
+    def __init__(self, dwi, a, h, kernel, num_iterations=5, **kwargs):
+        """Implement object initialization."""
+
+        self._dwi = dwi  # The HDF5 file object: avoid having the entire 4D volume in memory
+        self._a = a
+        self._h = h
+        self._num_iterations = num_iterations
+
+        # Initialize
+        self._betas = 0
+        self._r = 0
+
+        # ToDo
+        # Build the GP kernel here or in fit ?
+        self._gpr = None
+        # Does the kernel depend on which data we use as the training data (i.e.
+        # varies with the index we choose to predict)?
+        self._kernel = kernel
+        self._model = None
+
+    def fit(self, X, y, *args, **kwargs):
+        """The x are our gradient directions; the observations are our diffusion
+        volumes.
+        X: array-like of shape (n_samples, n_features), n_samples being
+        the number of gradients, and the n_features the number of shells ?
+        Or n_samples being the number of voxels in the DWI volume, and n_features
+        being 3 (bvec coordinates)
+        y: _array-like of shape (n_samples,) or (n_samples, n_targets)"""
+
+        self._gpr = GaussianProcessRegressor(kernel=self._kernel, random_state=0)
+        self._gpr.fit(X, y)
+
+    def predict(self, X, **kwargs):
+        """Return the Gaussian Process prediction according to [Andersson16]_
+        where X is a gradient direction."""
+        # ToDo
+        # Call self._gprlog_marginal_likelihood for eq. 12 in Andersson 15 ?
+        y_mean, y_std = self._gpr.predict(X, return_std=True)
+        return y_mean, y_std
+
+
+class GaussianProcessModel:
+    """A Gaussian Process model based on [Andersson16a]_ (fig 1).
+    DWIs need to be transformed to a single ref space (fig 2 [Andersson16b]_ ?)
+
+    Definitions:
+    s: reference/undistorted space: used to denote the space or any image in
+    that space
+    f: observed/distorted image: used to denote any image in acquisition space
+    a: acquisition parameters: PE‐direction and bandwidth in PE‐direction
+    r: rigid body (subject movement) parameters
+    \beta: Eddy current parameters
+    e(\beta): Eddy current‐induced off resonance field (Hz)
+    h: Susceptibility induced off‐resonance field (Hz)
+
+    (fig 1) and algorithm:
+    1. Input: N DWI volumes f_{i} with acq parameters a_{i}; susceptibility
+    field h
+    2. Initialize: set all beta_{i} and r_i{i} = 0
+    3. Compute for M iterations
+     - Load GP prediction maker
+     - For all i in N (DWIs)
+       - Compute \\hat{s}_{i} (f_{i}, h, \beta_{i}, r_{i}, a_{i}) eqs 2 and 4
+       - Load \\hat{s}_{i} (f_{i}, h, \beta_{i}, r_{i}, a_{i}) as training
+         data for GP
+     - Estimate hyperparameters for the GP used to predict the signal shape
+       for every voxel
+     - Update EC and movement parameters
+     - For all i in N (DWIs)
+       - Draw a prediction s_{i} from the GP
+       - Compute \\hat{f}_{i} (s_{i}, h, \beta_{i}, r_{i}, a_{i})
+       - Use \\hat{f}_{i} - f_{i} to update \beta_{i} and r_{i} (eq 6)
+
+    a: direction of the PE and the total readout time (here defined as the time
+    between the acquisition of the center of the first and last echoes).
+    Internally, a is divided into a = [p t] where p is a unity length 1 x 3
+    vector defining the PE direction (such that for example [1 0 0], [−1 0 0],
+    [0 1 0] and [0 −1 0] denote R → L, L → R, P → A and A  P PE direction
+    respectively) and where t denotes the readout time (in seconds).
+    r: 1x6 vector: 3 translations, 3 rotations
+    \beta: four for linear; ten for quadratic, twenty for cubic.
+    h: assumed to be in the same space as the first b = 0 image supplied to
+    eddy, which will be automatically fulfilled if it was estimated by topup
+    and that same b = 0 image was the first of those supplied to topup. Hence,
+    it can be said to help define the reference/undistorted space as the first
+    b = 0 image after distortion correction by h.
+
+    See Appendix A for further details.
+
+    Add the outlier detection part in [Andersson16b]?
+
+    References
+    ----------
+    .. [Andersson16a] J. L. R. Andersson. et al., An integrated approach to
+    correction for off-resonance effects and subject movement in diffusion MR
+    imaging, NeuroImage 125 (2016) 1063–1078
+    .. [Andersson16b] J. L. R. Andersson. et al., Incorporating outlier
+    detection and replacement into a non-parametric framework for movement and
+    distortion correction of diffusion MR images, NeuroImage 141 (2016) 556–572
+    """
     __slots__ = ("_dwi", "_a", "_h", "_kernel", "_num_iterations", "_betas", "_r", "_gpr")
 
     def __init__(self, dwi, a, h, kernel, num_iterations=5, **kwargs):
@@ -525,11 +638,6 @@ class GaussianProcessModel:
         # Fit the Gaussian Process Regressor with the optimized kernel
         self._gpr = GaussianProcessRegressor(kernel=self._kernel)
         self._gpr.fit(reshaped_angles, voxel_intensities_flatten)  # Here there is a problem with the shape of the data
-
-        print("\nOptimal hyperparameters:")
-        print("Lambda:", optimal_lambda)
-        print("a:", optimal_a)
-        print("Sigma squared:", optimal_sigma_sq)
 
     def predict(self, gradient, **kwargs):
         """Return the Gaussian Process prediction according to [Andersson16]_"""

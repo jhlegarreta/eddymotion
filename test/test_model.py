@@ -24,6 +24,7 @@
 
 import numpy as np
 import pytest
+from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel
 
 from eddymotion import model
 from eddymotion.data.dmri import DWI
@@ -91,21 +92,9 @@ def test_average_model():
     assert np.all(tmodel_2000.predict([0, 0, 0]) == 1100)
 
 
-def test_gp_model():
-
-    import nibabel as nib
+def test_gp_model(datadir):
     # ToDo
-    # Transition to the HDF5 format eventually
-    root_path = "nireports/nireports/tests/data"
-    fname_dwi = root_path + "/ds000114_sub-01_ses-test_desc-trunc_dwi.nii.gz"
-    fname_bval = root_path + "/ds000114_sub-01_ses-test_desc-trunc_dwi.bval"
-    fname_bvec = root_path + "/ds000114_sub-01_ses-test_desc-trunc_dwi.bvec"
-    dwi_img = nib.load(fname_dwi)
-    bvecs = np.loadtxt(fname_bvec).T
-    bvals = np.loadtxt(fname_bval)
-    b0s_mask = bvals < 50
-    gradients = np.hstack([bvecs[~b0s_mask], bvals[~b0s_mask, None]])
-    # ToDo: what if we are in the multi-shell case ?
+    # What if we are in the multi-shell case ?
     # Assume single shell case for now
     num_gradients = 1
     # a = np.zeros(num_gradients)  # acquisition parameters
@@ -113,23 +102,52 @@ def test_gp_model():
     # ToDo
     # Provide proper values/estimates for these
     a = 1
-    h = 1  # should be a nifti image
+    h = 1  # should be a NIfTI image
 
     # ToDo
-    # Build kernel properly
-    kernel = np.ones(20)
+    # Build the kernel properly following the paper.
+    # Also, needs to be a sklearn.gaussian_process.kernels.Kernel instance:
+    # https://scikit-learn.org/stable/modules/generated/sklearn.gaussian_process.kernels.Kernel.html
+    # kernel = np.ones(20)
+    kernel = DotProduct() + WhiteKernel()
+
+    dwi = DWI.from_filename(datadir / "dwi.h5")
+
+    _dwi_data = dwi.dataobj
+    # Use a subset of the data for now to see that something is written to the
+    # output
+    # bvecs = dwi.gradients[:3, :].T
+    bvecs = dwi.gradients[:3, 10:13].T  # b0 values have already been masked
+    # bvals = dwi.gradients[3:, 10:13].T  # Only for inspection purposes: [[1005.], [1000.], [ 995.]]
+    dwi_data = _dwi_data[60:63, 60:64, 40:45, 10:13]
 
     num_iterations = 5
-    gp = model.GaussianProcessModel(dwi=dwi_img, a=a, h=h, kernel=kernel, num_iterations=num_iterations)
+    gp = model.GaussianProcessModel(
+        dwi=dwi, a=a, h=h, kernel=kernel, num_iterations=num_iterations
+    )
+    indices = list(range(bvecs.shape[0]))
+    # ToDo
+    # This should be done within the GP model class
+    # Apply lovo strategy properly
+    # Vectorize and parallelize
+    result = np.zeros_like(dwi_data)
+    for idx in indices:
+        lovo_idx = np.ones(len(indices), dtype=bool)
+        lovo_idx[idx] = False
+        X = bvecs[lovo_idx]
+        for i in range(dwi_data.shape[0]):
+            for j in range(dwi_data.shape[1]):
+                for k in range(dwi_data.shape[2]):
+                    # ToDo
+                    # Use a mask to avoid traversing background data
+                    y = dwi_data[i, j, k, lovo_idx]
+                    gp.fit(X, y)
+                    prediction, _ = gp.predict(
+                        bvecs[idx, :][np.newaxis]
+                    )  # Can take multiple values X[:2, :]
+                    result[i, j, k, idx] = prediction.item()
 
-    dwi_data = dwi_img.get_fdata()[..., ~b0s_mask]
-
-    lovo_index = 5
-    train_idx = np.where(np.asarray(range(len(bvals[~b0s_mask]))) != lovo_index)
-    data_train = dwi_data[..., train_idx]
-    data_train = dwi_data
-    gp.fit(data_train[0], data_train[1])
-    predicted1 = gp.predict(data_test[1])
+    assert result.shape == dwi_data.shape
 
 
 def test_two_initialisations(datadir):
