@@ -23,8 +23,11 @@
 import numpy as np
 from dipy.core.gradients import get_bval_indices
 from sklearn.cluster import KMeans
+<<<<<<< HEAD
 from sklearn.gaussian_process.kernels import Kernel
 from scipy.optimize import minimize, Bounds
+=======
+>>>>>>> jhlegarreta/ImplementGaussianProcess
 
 B0_THRESHOLD = 50  # from dmriprep
 SHELL_DIFF_THRES = 20  # 150 in dmriprep
