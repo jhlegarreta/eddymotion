@@ -154,6 +154,13 @@ def negative_log_likelihood(beta, y, angles_array, reg_param=1e-6):
     lambda_, a, sigma_sq = np.exp(beta)
     kernel = SphericalCovarianceKernel(lambda_=lambda_, a=a, sigma_sq=sigma_sq)
     K = kernel(angles_array)
+    
+    # Check if the kernel matrix is positive definite
+    eigenvalues = np.linalg.eigvals(K)
+    if np.any(eigenvalues <= 0):
+        print("Non-positive definite kernel matrix")
+        return 1e10  # Penalize non-positive definite kernel
+    
     log_likelihood = -0.5 * (np.dot(y.T, np.linalg.solve(K, y)) + np.linalg.slogdet(K)[1] + len(y) * np.log(2 * np.pi))
     regularization = reg_param * (np.sum(beta**2))
     return -log_likelihood + regularization
