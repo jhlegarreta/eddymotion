@@ -24,7 +24,7 @@
 import numpy as np
 import pytest
 
-from eddymotion.model.utils import SphericalCovarianceKernel
+from eddymotion.model.kernels import SphericalCovarianceKernel
 
 def test_kernel_call():
     # Create a SphericalCovarianceKernel instance

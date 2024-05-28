@@ -23,112 +23,10 @@
 import numpy as np
 from dipy.core.gradients import get_bval_indices
 from sklearn.cluster import KMeans
-<<<<<<< HEAD
-from sklearn.gaussian_process.kernels import Kernel
 from scipy.optimize import minimize, Bounds
-=======
->>>>>>> jhlegarreta/ImplementGaussianProcess
 
 B0_THRESHOLD = 50  # from dmriprep
 SHELL_DIFF_THRES = 20  # 150 in dmriprep
-
-
-class SphericalCovarianceKernel(Kernel):
-    """
-    Custom kernel based on spherical covariance function.
-
-    Parameters
-    ----------
-    lambda_ : float, default=1.0
-        Scale parameter for the covariance function.
-    a : float, default=1.0
-        Distance parameter where the covariance function goes to zero.
-    sigma_sq : float, default=1.0
-        Noise variance term.
-    """
-    def __init__(self, lambda_=1.0, a=1.0, sigma_sq=1.0):
-        self.lambda_ = lambda_
-        self.a = a
-        self.sigma_sq = sigma_sq
-
-    def __call__(self, theta):
-        """
-        Compute the kernel matrix.
-
-        Parameters
-        ----------
-        theta : array-like of shape (n_samples, n_samples)
-            Precomputed pairwise angles.
-
-        Returns
-        -------
-        K : array-like of shape (n_samples, n_samples)
-            Kernel matrix.
-        """
-        K = np.where(theta <= self.a, 1 - 3 * (theta / self.a) ** 2 + 2 * (theta / self.a) ** 3, 0)
-        return self.lambda_ * K + self.sigma_sq * np.eye(len(theta))
-
-    def diag(self, X):
-        """
-        Returns the diagonal of the kernel matrix.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-            Input data.
-
-        Returns
-        -------
-        array-like of shape (n_samples,)
-            Diagonal of the kernel matrix.
-        """
-        return np.full(X.shape[0], self.lambda_ + self.sigma_sq)
-
-    def is_stationary(self):
-        """
-        Returns whether the kernel is stationary.
-
-        Returns
-        -------
-        bool
-            True if the kernel is stationary.
-        """
-        return True
-
-    def get_params(self, deep=True):
-        """
-        Get parameters of the kernel.
-
-        Parameters
-        ----------
-        deep : bool, default=True
-            Whether to return the parameters of the contained subobjects.
-
-        Returns
-        -------
-        params : dict
-            Parameter names mapped to their values.
-        """
-        return {"lambda_": self.lambda_, "a": self.a, "sigma_sq": self.sigma_sq}
-
-    def set_params(self, **params):
-        """
-        Set parameters of the kernel.
-
-        Parameters
-        ----------
-        params : dict
-            Kernel parameters.
-
-        Returns
-        -------
-        self : object
-            Returns self.
-        """
-        self.lambda_ = params.get("lambda_", self.lambda_)
-        self.a = params.get("a", self.a)
-        self.sigma_sq = params.get("sigma_sq", self.sigma_sq)
-        return self
 
 
 def negative_log_likelihood(beta, y, angles_array, reg_param=1e-6):
@@ -165,6 +63,7 @@ def negative_log_likelihood(beta, y, angles_array, reg_param=1e-6):
     regularization = reg_param * (np.sum(beta**2))
     return -log_likelihood + regularization
 
+
 def total_negative_log_likelihood(beta, y_all, angles_array, reg_param=1e-6):
     """
     Total negative log marginal likelihood for all voxels processed in chunks.
@@ -189,6 +88,7 @@ def total_negative_log_likelihood(beta, y_all, angles_array, reg_param=1e-6):
     for y in y_all.T:  # Iterate over voxels
         total_log_likelihood += negative_log_likelihood(beta, y, angles_array, reg_param)
     return total_log_likelihood
+
 
 def stochastic_optimization_with_early_stopping(initial_beta, data, angles, batch_size, max_iter=10000, patience=100, tolerance=1e-4):
     """
@@ -253,6 +153,7 @@ def stochastic_optimization_with_early_stopping(initial_beta, data, angles, batc
         print(f'Current hyperparameters: {np.exp(beta)}')
 
     return best_beta
+
 
 def is_positive_definite(matrix):
     """Check whether the given matrix is positive definite. Any positive

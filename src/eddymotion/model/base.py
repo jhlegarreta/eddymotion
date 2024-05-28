@@ -29,7 +29,8 @@ from dipy.core.gradients import gradient_table
 from joblib import Parallel, delayed
 from sklearn.gaussian_process import GaussianProcessRegressor
 
-from .utils import calculate_angle_matrix, SphericalCovarianceKernel, stochastic_optimization_with_early_stopping
+from .utils import calculate_angle_matrix, stochastic_optimization_with_early_stopping
+from .kernels import SphericalCovarianceKernel
 
 
 def _exec_fit(model, data, chunk=None):
