@@ -183,24 +183,6 @@ def total_negative_log_likelihood(beta, y_all, angles_array, reg_param=1e-6):
         total_log_likelihood += negative_log_likelihood(beta, y, angles_array, reg_param)
     return total_log_likelihood
 
-def compute_angle(gradients):
-    """
-    Compute angles between gradient directions.
-
-    Parameters
-    ----------
-    gradients : array-like of shape (n_gradients, 3)
-        Gradient directions.
-
-    Returns
-    -------
-    angles : array-like of shape (n_gradients, n_gradients)
-        Pairwise angles between gradient directions.
-    """
-    gradient_vectors = gradients.T[:, :3]
-    angles = np.arccos(np.clip(np.abs(np.dot(gradient_vectors, gradient_vectors[0]) / (np.linalg.norm(gradient_vectors, axis=1) * np.linalg.norm(gradient_vectors[0]))), -1.0, 1.0))
-    return angles
-
 def stochastic_optimization_with_early_stopping(initial_beta, data, angles, batch_size, max_iter=10000, patience=100, tolerance=1e-4):
     """
     Stochastic Optimization with Early Stopping.
