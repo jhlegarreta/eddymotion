@@ -28,6 +28,7 @@ import numpy as np
 from dipy.core.gradients import gradient_table
 from joblib import Parallel, delayed
 from sklearn.gaussian_process import GaussianProcessRegressor
+from scipy.optimize import minimize, Bounds
 
 from .utils import calculate_angle_matrix, stochastic_optimization_with_early_stopping
 from .kernels import SphericalCovarianceKernel
@@ -498,7 +499,7 @@ class GaussianProcessModel:
         self._r = 0
         self._kernel = kernel
 
-    def fit(self, gradient_directions, data, initial_beta=np.log([100.0, 0.2, 10.0]), batch_size=1000, max_iter=1000, tolerance=1e-4, patience=20):
+    def fit(self, gradient_directions, data, initial_beta, batch_size=1000, max_iter=1000, tolerance=1e-4, patience=20, hp_opti_method='LOO'):
         """
         Fit the Gaussian Process model to the training data.
 
@@ -506,7 +507,7 @@ class GaussianProcessModel:
         ----------
         gradient_directions : array-like of shape (num_directions, 3)
             Training data (gradient directions).
-        voxel_intensities : array-like of shape (num_directions, num_voxels)
+        data : array-like of shape (num_directions, num_voxels)
             Target values (diffusion volumes).
         initial_beta : array-like of shape (3,)
             Initial guess for the log-transformed hyperparameters.
@@ -518,17 +519,37 @@ class GaussianProcessModel:
             Tolerance for improvement in loss.
         patience : int, default=20
             Patience for early stopping.
+        hp_opti_method : str, default='LOO'
+            Method for hyperparameter optimization. Options are 'LOO' for Leave-One-Out cross-validation 
+            and 'MML' for Marginal Maximum Likelihood with stochastic optimization.
         """
+        # bounds estimation
+        lambda_upper = 1e4
+        lambda_lower = 1e-6
+        a_upper = np.pi
+        a_lower = 1e-6
+        sigma_sq_upper = 1e4
+        sigma_sq_lower = 1e-6
+
+        bounds = Bounds(np.log([lambda_lower, a_lower, sigma_sq_lower]), np.log([lambda_upper, a_upper, sigma_sq_upper]))
+
         # Compute angles from the gradient directions
-        angles = calculate_angle_matrix(gradient_directions)
+        angles = calculate_angle_matrix(gradient_directions.T)
 
         voxel_intensities_flatten = data.reshape(len(angles), -1)
         reshaped_angles = angles.reshape(-1, 1)
-        print(f'Voxel intensities shape: {voxel_intensities_flatten.shape}')
-        print(f'Gradient directions shape: {reshaped_angles.shape}')
 
-        # Run the stochastic optimization with early stopping
-        optimal_beta = stochastic_optimization_with_early_stopping(initial_beta, voxel_intensities_flatten, angles, batch_size=batch_size, max_iter=max_iter, patience=patience, tolerance=tolerance)
+        if hp_opti_method == 'LOO':
+            result = minimize(loo_cross_validation, initial_beta, args=(voxel_intensities_flatten, angles), bounds=bounds, method='L-BFGS-B', options={'maxiter':10})
+            optimal_beta = result.x
+
+        elif hp_opti_method == 'MML':
+
+            optimal_beta = stochastic_optimization_with_early_stopping(initial_beta, voxel_intensities_flatten, angles, batch_size, bounds, max_iter, patience, tolerance)
+
+        else:
+            raise NotImplementedError(f"Hyperparameter optimization method {hp_opti_method} is not implemented")
+
         optimal_lambda, optimal_a, optimal_sigma_sq = np.exp(optimal_beta)
 
         # Update the kernel with the optimized hyperparameters
@@ -536,11 +557,11 @@ class GaussianProcessModel:
 
         # Fit the Gaussian Process Regressor with the optimized kernel
         self._gpr = GaussianProcessRegressor(kernel=self._kernel)
-        self._gpr.fit(angles, voxel_intensities_flatten)  # Here there is a problem with the shape of the data
+        self._gpr.fit(angles, voxel_intensities_flatten)
 
-    def predict(self, gradient, **kwargs):
+    def predict(self, angles, **kwargs):
         """Return the Gaussian Process prediction according to [Andersson16]_"""
-        y_mean, y_std = self._gpr.predict(gradient, return_std=True)
+        y_mean, y_std = self._gpr.predict(angles, return_std=True)
         return y_mean, y_std
 
 

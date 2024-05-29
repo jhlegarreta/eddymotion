@@ -25,6 +25,8 @@ from dipy.core.gradients import get_bval_indices
 from sklearn.cluster import KMeans
 from scipy.optimize import minimize, Bounds
 
+from .kernels import SphericalCovarianceKernel
+
 B0_THRESHOLD = 50  # from dmriprep
 SHELL_DIFF_THRES = 20  # 150 in dmriprep
 
@@ -50,15 +52,15 @@ def negative_log_likelihood(beta, y, angles_array, reg_param=1e-6):
         Negative log marginal likelihood.
     """
     lambda_, a, sigma_sq = np.exp(beta)
-    kernel = SphericalCovarianceKernel(lambda_=lambda_, a=a, sigma_sq=sigma_sq)
+    kernel = SphericalCovarianceKernel(lambda_=lambda_, a=a, sigma_sq=sigma_sq)  # generalize for other kernels?
     K = kernel(angles_array)
-    
+
     # Check if the kernel matrix is positive definite
-    eigenvalues = np.linalg.eigvals(K)
+    eigenvalues = np.linalg.eigvals(K)  # Todo : replace with more efficient method when corresponding PR is merged
     if np.any(eigenvalues <= 0):
         print("Non-positive definite kernel matrix")
         return 1e10  # Penalize non-positive definite kernel
-    
+
     log_likelihood = -0.5 * (np.dot(y.T, np.linalg.solve(K, y)) + np.linalg.slogdet(K)[1] + len(y) * np.log(2 * np.pi))
     regularization = reg_param * (np.sum(beta**2))
     return -log_likelihood + regularization
@@ -88,6 +90,48 @@ def total_negative_log_likelihood(beta, y_all, angles_array, reg_param=1e-6):
     for y in y_all.T:  # Iterate over voxels
         total_log_likelihood += negative_log_likelihood(beta, y, angles_array, reg_param)
     return total_log_likelihood
+
+
+def loo_cross_validation(beta, y_all, angles_array):
+    """
+    Leave-One-Out Cross-Validation for hyperparameter optimization.
+
+    Parameters
+    ----------
+    beta : array-like of shape (3,)
+        Log-transformed hyperparameters.
+    y_all : array-like of shape (n_samples, n_voxels)
+        Observed data for all voxels.
+    angles_array : array-like of shape (n_samples, n_features)
+        Pairwise angles between gradient directions.
+
+    Returns
+    -------
+    float
+        Mean LOO-CV error.
+    """
+    lambda_, a, sigma_sq = np.exp(beta)
+    kernel = SphericalCovarianceKernel(lambda_=lambda_, a=a, sigma_sq=sigma_sq)
+    K = kernel(angles_array)
+    n = y_all.shape[0]
+
+    errors = []
+    for i in range(n):
+        K_train = np.delete(np.delete(K, i, axis=0), i, axis=1)
+        y_train = np.delete(y_all, i, axis=0)
+
+        K_test = K[i, np.arange(K.shape[0]) != i]
+        # Solve for alpha
+        alpha = np.linalg.solve(K_train, y_train)
+
+        # Compute prediction for left-out point
+        y_pred = K_test @ alpha
+
+        # Compute the error
+        error = (y_all[i] - y_pred)**2
+        errors.append(error)
+    print(f'Error: {np.mean(errors)}')
+    return np.mean(errors)
 
 
 def stochastic_optimization_with_early_stopping(initial_beta, data, angles, batch_size, max_iter=10000, patience=100, tolerance=1e-4):
