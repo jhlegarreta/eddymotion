@@ -20,6 +20,7 @@
 #
 #     https://www.nipreps.org/community/licensing/
 #
+import numpy as np
 from sklearn.gaussian_process.kernels import Kernel
 
 

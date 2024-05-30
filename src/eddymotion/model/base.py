@@ -30,7 +30,7 @@ from joblib import Parallel, delayed
 from sklearn.gaussian_process import GaussianProcessRegressor
 from scipy.optimize import minimize, Bounds
 
-from .utils import calculate_angle_matrix, stochastic_optimization_with_early_stopping
+from .utils import calculate_angle_matrix, stochastic_optimization_with_early_stopping,loo_cross_validation
 from .kernels import SphericalCovarianceKernel
 
 
