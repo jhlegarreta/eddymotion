@@ -42,7 +42,7 @@ class SphericalCovarianceKernel(Kernel):
         self.a = a
         self.sigma_sq = sigma_sq
 
-    def __call__(self, theta):
+    def __call__(self, theta, theta_prime=None):
         """
         Compute the kernel matrix.
 
@@ -56,6 +56,8 @@ class SphericalCovarianceKernel(Kernel):
         K : array-like of shape (n_samples, n_samples)
             Kernel matrix.
         """
+        if theta_prime is not None:
+            theta = theta_prime
         K = np.where(theta <= self.a, 1 - 3 * (theta / self.a) ** 2 + 2 * (theta / self.a) ** 3, 0)
         return self.lambda_ * K + self.sigma_sq * np.eye(len(theta))
 
