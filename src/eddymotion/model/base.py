@@ -134,11 +134,11 @@ class BaseModel:
 
     def fit(self, data, **kwargs):
         """Abstract member signature of fit()."""
-        raise NotImplementedError('Cannot call fit() on a BaseModel instance.')
+        raise NotImplementedError("Cannot call fit() on a BaseModel instance.")
 
     def predict(self, *args, **kwargs):
         """Abstract member signature of predict()."""
-        raise NotImplementedError('Cannot call predict() on a BaseModel instance.')
+        raise NotImplementedError("Cannot call predict() on a BaseModel instance.")
 
 
 class PETModel(BaseModel):
@@ -226,7 +226,7 @@ class PETModel(BaseModel):
         from scipy.interpolate import BSpline
 
         if index is None:
-            raise ValueError('A timepoint index to be simulated must be provided.')
+            raise ValueError("A timepoint index to be simulated must be provided.")
 
         if not self._is_fitted:
             raise ModelNotFittedError(f"{type(self).__name__} must be fitted before predicting")
@@ -345,7 +345,7 @@ class BaseDWIModel(BaseModel):
         """Predict asynchronously chunk-by-chunk the diffusion signal."""
 
         if gradient is None:
-            raise ValueError('A gradient to be simulated (b-vector, b-value) must be provided')
+            raise ValueError("A gradient to be simulated (b-vector, b-value) must be provided")
 
         if not self._is_fitted:
             raise ModelNotFittedError(f"{type(self).__name__} must be fitted before predicting")
@@ -368,7 +368,7 @@ class BaseDWIModel(BaseModel):
         n_models = len(self._models) if self._model is None and self._models else 1
 
         if n_models == 1:
-            predicted, _ = _exec_predict(self._model, **(kwargs | {'gtab': self._gtab, 'S0': S0}))
+            predicted, _ = _exec_predict(self._model, **(kwargs | {"gtab": self._gtab, "S0": S0}))
         else:
             S0 = np.array_split(S0, n_models) if S0 is not None else [None] * n_models
 
@@ -380,7 +380,7 @@ class BaseDWIModel(BaseModel):
                     delayed(_exec_predict)(
                         model,
                         chunk=i,
-                        **(kwargs | {'gtab': self._gtab, 'S0': S0[i]}),
+                        **(kwargs | {"gtab": self._gtab, "S0": S0[i]}),
                     )
                     for i, model in enumerate(self._models)
                 )
@@ -460,7 +460,7 @@ class AverageDWModel(BaseDWIModel):
         """Calculate the average."""
 
         if (gtab := kwargs.pop("gtab", None)) is None:
-            raise ValueError('A gradient table must be provided.')
+            raise ValueError("A gradient table must be provided.")
 
         # Select the interval of b-values for which DWIs will be averaged
         b_mask = (
