@@ -27,7 +27,7 @@
 
 from sklearn.gaussian_process import GaussianProcessRegressor
 from dipy.reconst.base import ReconstModel
-
+from dipy.reconst.multi_voxel import multi_voxel_fit
 
 def gp_prediction(model, gtab, mask=None):
     """Predict one or more DWI orientiations given a model."""
@@ -87,7 +87,8 @@ class GaussianProcessModel(ReconstModel):
         self.kernel_model = kernel_model
         self.mask = mask
 
-    def fit(self, data, mask=None, random_state=0):
+    @multi_voxel_fit
+    def fit(self, data, mask=None, random_state=0, **kwargs):
         """Fit method of the DTI model class
 
         Parameters
