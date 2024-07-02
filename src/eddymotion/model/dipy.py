@@ -21,16 +21,43 @@
 #     https://www.nipreps.org/community/licensing/
 #
 """DIPY-like models (a sandbox to trial them out before upstreaming to DIPY)."""
+from __future__ import annotations
 
-# import numpy as np
-
+import numpy as np
 
 from sklearn.gaussian_process import GaussianProcessRegressor
+from dipy.core.gradients import GradientTable
 from dipy.reconst.base import ReconstModel
 from dipy.reconst.multi_voxel import multi_voxel_fit
 
-def gp_prediction(model, gtab, mask=None):
-    """Predict one or more DWI orientiations given a model."""
+
+def gp_prediction(
+    model: GaussianProcessRegressor,
+    gtab: np.ndarray,
+    mask: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Predicts one or more DWI orientations given a model.
+
+    This function checks if the model is fitted and then extracts
+    orientations and potentially b-values from the gtab. It predicts the mean
+    and standard deviation of the DWI signal using the model.
+
+    Parameters
+    ----------
+    model: :obj:`~sklearn.gaussian_process.GaussianProcessRegressor`
+        A fitted GaussianProcessRegressor model.
+    gtab: :obj:`~dipy.core.gradients.GradientTable`
+        A gradient table containing diffusion encoding information.
+    mask: :obj:`numpy.ndarray`
+        A boolean mask indicating which voxels to use (optional).
+
+    Returns
+    -------
+    :obj:`numpy.ndarray`
+        A 3D or 4D array with the simulated gradient(s).
+
+    """
 
     # Check it's fitted as they do in sklearn internally
     # https://github.com/scikit-learn/scikit-learn/blob/972e17fe1aa12d481b120ad4a3dc076bae736931/\
@@ -39,11 +66,44 @@ def gp_prediction(model, gtab, mask=None):
         raise RuntimeError("Model is not yet fitted.")
 
     # Extract orientations from gtab, and highly likely, the b-value too.
-    y_mean, y_std = self._gpr.predict(gtab, return_std=True)
+    return model._gpr.predict(gtab, return_std=False)
 
-    # TODO reshape to be N voxels x G gradient directions (typically only one)
 
-    return y_mean, y_std
+def get_kernel(kernel_model: str) -> GaussianProcessRegressor.kernel:
+    """
+    Returns a Gaussian process kernel based on the provided string.
+
+    Currently supports 'test' kernel which is a combination of DotProduct and WhiteKernel
+    from scikit-learn. Raises a TypeError for unknown kernel models.
+
+    Parameters
+    ----------
+    kernel_model: :obj:`str`
+        The string representing the desired kernel model.
+
+    Returns
+    -------
+    :obj:`GaussianProcessRegressor.kernel`
+        A GaussianProcessRegressor kernel object.
+
+    Raises
+    ------
+    TypeError: If the provided kernel_model is not supported.
+
+    """
+
+    if kernel_model == 'spherical':
+        raise NotImplementedError("Spherical kernel is not currently implemented.")
+
+    if kernel_model == 'exponential':
+        raise NotImplementedError("Exponential kernel is not currently implemented.")
+
+    if kernel_model == 'test':
+        from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel
+
+        return DotProduct() + WhiteKernel()
+
+    raise TypeError(f"Unknown kernel '{kernel_model}'.")
 
 
 class GaussianProcessModel(ReconstModel):
@@ -55,7 +115,14 @@ class GaussianProcessModel(ReconstModel):
         "_gpr",
     )
 
-    def __init__(self, gtab, kernel_model="spherical", mask=None, *args, **kwargs):
+    def __init__(
+        self,
+        gtab: GradientTable,
+        kernel_model: str = "spherical",
+        random_state: int = 0,
+        *args,
+        **kwargs,
+    ):
         """A GP-based DWI model [Andersson15]_.
 
         Parameters
@@ -64,14 +131,6 @@ class GaussianProcessModel(ReconstModel):
 
         kernel_model : str
             Kernel model to calculate the GP's covariance matrix.
-
-        args, kwargs :
-            arguments and key-word arguments passed to the fit_method.
-            See dti.wls_fit_tensor, dti.ols_fit_tensor for details
-
-        min_signal : float, optional
-            The minimum signal value. Needs to be a strictly positive
-            number. Default: minimal signal in the data provided to `fit`.
 
         References
         ----------
@@ -85,10 +144,13 @@ class GaussianProcessModel(ReconstModel):
 
         ReconstModel.__init__(self, gtab)
         self.kernel_model = kernel_model
-        self.mask = mask
+        self.gtab = gtab
+        self._gpr = GaussianProcessRegressor(
+            kernel=get_kernel(self.kernel_model),
+            random_state=random_state,
+        )
 
-    @multi_voxel_fit
-    def fit(self, data, mask=None, random_state=0, **kwargs):
+    def fit(self, data, gtab=None, mask=None):
         """Fit method of the DTI model class
 
         Parameters
@@ -102,27 +164,23 @@ class GaussianProcessModel(ReconstModel):
 
         """
 
-        if self.kernel_model == 'spherical':
-            raise NotImplementedError
-        elif self.kernel_model == 'exponential':
-            raise NotImplementedError
-        elif self.kernel_model == 'test':
-            from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel
-
-            kernel = DotProduct() + WhiteKernel()
-
-        else:
-            raise TypeError(f"Unknown kernel '{self.kernel_model}'.")
-
-        self._gpr = GaussianProcessRegressor(kernel=kernel, random_state=random_state)
-
         if mask is not None:
-            self.mask = mask
-            data = data[mask]
+            data = data[mask[..., None]]
+        else:
+            data = np.reshape(data, (-1, data.shape[-1]))
 
-        return GPFit(self._gpr.fit(self._gtab, data))
+        gtab = gtab if gtab is not None else self.gtab
+        return GPFit(
+            self._gpr.fit(gtab, data),
+            gtab=gtab,
+            mask=mask,
+        )
 
-    def predict(self, gtab, **kwargs):
+    @multi_voxel_fit
+    def multi_fit(self, data_thres, mask=None, **kwargs):
+        return GPFit(self._gpr.fit(self.gtab, data_thres))
+
+    def predict(self, gtab, mask=None, **kwargs):
         """Predict using the Gaussian process model of the DWI signal, where
         ``X`` is a diffusion-encoding gradient vector whose DWI data needs to be
         estimated.
@@ -139,7 +197,7 @@ class GaussianProcessModel(ReconstModel):
 
         """
 
-        return gp_prediction(self._gpr, gtab, mask=self.mask)
+        return gp_prediction(self._gpr, gtab, mask=mask)
 
 
 class GPFit:
