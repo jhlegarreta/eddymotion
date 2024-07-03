@@ -21,21 +21,23 @@
 #     https://www.nipreps.org/community/licensing/
 #
 """DIPY-like models (a sandbox to trial them out before upstreaming to DIPY)."""
+
 from __future__ import annotations
 
 import numpy as np
-
-from sklearn.gaussian_process import GaussianProcessRegressor
 from dipy.core.gradients import GradientTable
 from dipy.reconst.base import ReconstModel
-from dipy.reconst.multi_voxel import multi_voxel_fit
+from sklearn.gaussian_process import GaussianProcessRegressor
+
+# from dipy.reconst.multi_voxel import multi_voxel_fit
 
 
 def gp_prediction(
+    model_gtab: GradientTable,
+    gtab: GradientTable,
     model: GaussianProcessRegressor,
-    gtab: np.ndarray,
-    mask: np.ndarray | None = None
-) -> tuple[np.ndarray, np.ndarray]:
+    mask: np.ndarray | None = None,
+) -> np.ndarray:
     """
     Predicts one or more DWI orientations given a model.
 
@@ -48,7 +50,7 @@ def gp_prediction(
     model: :obj:`~sklearn.gaussian_process.GaussianProcessRegressor`
         A fitted GaussianProcessRegressor model.
     gtab: :obj:`~dipy.core.gradients.GradientTable`
-        A gradient table containing diffusion encoding information.
+        Gradient table with one or more orientations at which the GP will be evaluated.
     mask: :obj:`numpy.ndarray`
         A boolean mask indicating which voxels to use (optional).
 
@@ -69,7 +71,10 @@ def gp_prediction(
     return model._gpr.predict(gtab, return_std=False)
 
 
-def get_kernel(kernel_model: str) -> GaussianProcessRegressor.kernel:
+def get_kernel(
+    kernel_model: str,
+    gtab: GradientTable | None = None,
+) -> GaussianProcessRegressor.kernel:
     """
     Returns a Gaussian process kernel based on the provided string.
 
@@ -88,17 +93,17 @@ def get_kernel(kernel_model: str) -> GaussianProcessRegressor.kernel:
 
     Raises
     ------
-    TypeError: If the provided kernel_model is not supported.
+    TypeError: If the provided ``kernel_model`` is not supported.
 
     """
 
-    if kernel_model == 'spherical':
+    if kernel_model == "spherical":
         raise NotImplementedError("Spherical kernel is not currently implemented.")
 
-    if kernel_model == 'exponential':
+    if kernel_model == "exponential":
         raise NotImplementedError("Exponential kernel is not currently implemented.")
 
-    if kernel_model == 'test':
+    if kernel_model == "test":
         from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel
 
         return DotProduct() + WhiteKernel()
@@ -111,25 +116,20 @@ class GaussianProcessModel(ReconstModel):
 
     __slots__ = (
         "kernel_model",
-        "mask",
-        "_gpr",
+        "_modelfit",
     )
 
     def __init__(
         self,
-        gtab: GradientTable,
         kernel_model: str = "spherical",
-        random_state: int = 0,
         *args,
         **kwargs,
-    ):
+    ) -> None:
         """A GP-based DWI model [Andersson15]_.
 
         Parameters
         ----------
-        gtab : GradientTable class instance
-
-        kernel_model : str
+        kernel_model : :obj:`str`
             Kernel model to calculate the GP's covariance matrix.
 
         References
@@ -142,48 +142,66 @@ class GaussianProcessModel(ReconstModel):
 
         """
 
-        ReconstModel.__init__(self, gtab)
+        ReconstModel.__init__(self, None)
         self.kernel_model = kernel_model
-        self.gtab = gtab
-        self._gpr = GaussianProcessRegressor(
-            kernel=get_kernel(self.kernel_model),
-            random_state=random_state,
-        )
 
-    def fit(self, data, gtab=None, mask=None):
+    def fit(
+        self,
+        data: np.ndarray,
+        gtab: GradientTable | None = None,
+        mask: np.ndarray[bool] | None = None,
+        random_state: int = 0,
+    ) -> GPFit:
         """Fit method of the DTI model class
 
         Parameters
         ----------
-        data : array
+        data : :obj:`~numpy.ndarray`
             The measured signal from one voxel.
-
-        mask : array, optional
+        gtab : :obj:`~dipy.core.gradients.GradientTable`
+            The gradient table corresponding to the training data.
+        mask : :obj:`~numpy.ndarray`
             A boolean array used to mark the coordinates in the data that
             should be analyzed that has the shape data.shape[:-1]
 
+        Returns
+        -------
+        :obj:`~eddymotion.model.dipy.GPFit`
+            A model fit container object.
+
         """
 
-        if mask is not None:
-            data = data[mask[..., None]]
-        else:
-            data = np.reshape(data, (-1, data.shape[-1]))
+        data = (
+            data[mask[..., None]] if mask is not None else np.reshape(data, (-1, data.shape[-1]))
+        )
 
-        gtab = gtab if gtab is not None else self.gtab
-        return GPFit(
-            self._gpr.fit(gtab, data),
+        if data.shape[-1] != len(gtab):
+            raise ValueError(
+                f"Mismatched data {data.shape[-1]} and gradient table {len(gtab)} sizes."
+            )
+
+        gpr = GaussianProcessRegressor(
+            kernel=get_kernel(self.kernel_model, gtab=gtab),
+            random_state=random_state,
+        )
+        self._modelfit = GPFit(
+            gpr.fit(gtab.gradients, data),
             gtab=gtab,
             mask=mask,
         )
+        return self._modelfit
 
-    @multi_voxel_fit
-    def multi_fit(self, data_thres, mask=None, **kwargs):
-        return GPFit(self._gpr.fit(self.gtab, data_thres))
+    # @multi_voxel_fit
+    # def multi_fit(self, data_thres, mask=None, **kwargs):
+    #     return GPFit(gpr.fit(self.gtab, data_thres))
 
-    def predict(self, gtab, mask=None, **kwargs):
-        """Predict using the Gaussian process model of the DWI signal, where
-        ``X`` is a diffusion-encoding gradient vector whose DWI data needs to be
-        estimated.
+    def predict(
+        self,
+        gtab: GradientTable,
+        **kwargs,
+    ) -> np.ndarray:
+        """
+        Predict using the Gaussian process model of the DWI signal for one or more gradients.
 
         Parameters
         ----------
@@ -192,18 +210,70 @@ class GaussianProcessModel(ReconstModel):
 
         Returns
         -------
-        :obj:`~numpy.ndarray` of shape (n_voxels, n_gradients)
-            A 3D/4D array with the simulated voxels within the mask.
+        :obj:`numpy.ndarray`
+            A 3D or 4D array with the simulated gradient(s).
 
         """
-
-        return gp_prediction(self._gpr, gtab, mask=mask)
+        return self._modelfit.predict(gtab)
 
 
 class GPFit:
-    def __init__(self, model, mask):
+    """
+    A container class to store the fitted Gaussian process model and mask information.
+
+    This class is typically returned by the `fit` and `multi_fit` methods of the
+    `GaussianProcessModel` class. It holds the fitted model and the mask used during fitting.
+
+    Attributes
+    ----------
+    fitted_gtab : :obj:`~dipy.core.gradients.GradientTable`
+        The original gradient table with which the GP has been fitted.
+    model: :obj:`~sklearn.gaussian_process.GaussianProcessRegressor`
+        The fitted Gaussian process regressor object.
+    mask: :obj:`~numpy.ndarray`
+        The boolean mask used during fitting (can be ``None``).
+
+    """
+
+    def __init__(
+        self,
+        gtab: GradientTable,
+        model: GaussianProcessRegressor,
+        mask: np.ndarray | None = None,
+    ) -> None:
+        """
+        Initialize a Gaussian Process fit container.
+
+        Parameters
+        ----------
+        gtab : :obj:`~dipy.core.gradients.GradientTable`
+            The gradient table with which the GP has been fitted.
+        model: :obj:`~sklearn.gaussian_process.GaussianProcessRegressor`
+            The fitted Gaussian process regressor object.
+        mask: :obj:`~numpy.ndarray`
+            The boolean mask used during fitting (can be ``None``).
+
+        """
+        self.fitted_gtab = gtab
         self.model = model
         self.mask = mask
 
-    def predict(self, gtab):
-        return gp_prediction(self.model, gtab, mask=self.mask)
+    def predict(
+        self,
+        gtab: GradientTable,
+    ) -> np.ndarray:
+        """
+        Generate DWI signal based on a fitted Gaussian Process.
+
+        Parameters
+        ----------
+        gtab: :obj:`~dipy.core.gradients.GradientTable`
+            Gradient table with one or more orientations at which the GP will be evaluated.
+
+        Returns
+        -------
+        :obj:`numpy.ndarray`
+            A 3D or 4D array with the simulated gradient(s).
+
+        """
+        return gp_prediction(self.fitted_gtab, gtab, self.model, mask=self.mask)

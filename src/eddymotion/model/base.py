@@ -27,7 +27,6 @@ import warnings
 import numpy as np
 from dipy.core.gradients import gradient_table
 from joblib import Parallel, delayed
-from sklearn.gaussian_process import GaussianProcessRegressor
 
 from eddymotion.exceptions import ModelNotFittedError
 
@@ -519,9 +518,7 @@ class DKIModel(BaseDWIModel):
 class GPModel(BaseDWIModel):
     """A wrapper of :obj:`~eddymotion.model.dipy.GaussianProcessModel`."""
 
-    _modelargs = (
-        "kernel_model",
-    )
+    _modelargs = ("kernel_model",)
     _model_class = "eddymotion.model.dipy.GaussianProcessModel"
 
 
