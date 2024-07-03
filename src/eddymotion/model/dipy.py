@@ -350,7 +350,8 @@ def compute_spherical_covariance(
 
 
 def compute_pairwise_angles(
-    bvecs: np.ndarray,
+    gtab_X: GradientTable,
+    gtab_Y: GradientTable | None = None,
     closest_polarity: bool = True,
 ) -> np.ndarray:
     r"""Compute pairwise angles across diffusion gradient encoding directions.
@@ -364,8 +365,10 @@ def compute_pairwise_angles(
 
     Parameters
     ----------
-    bvecs : :obj:`~numpy.ndarray`
-        Diffusion gradient encoding directions in FSL format.
+    gtab_X: :obj:`~dipy.core.gradients.GradientTable`
+        Gradient table
+    gtab_Y: :obj:`~dipy.core.gradients.GradientTable`
+        Gradient table
     closest_polarity : :obj:`bool`
         ``True`` to consider the smallest of the two angles between the crossing
          lines resulting from reversing each vector pair.
@@ -379,12 +382,17 @@ def compute_pairwise_angles(
     --------
     >>> compute_pairwise_angles(
     ...     ((1.0, -1.0), (0.0, 0.0), (0.0, 0.0)),
-    ...     False,
+    ...     closest_polarity=False,
     ... )[0, 1]  # doctest: +ELLIPSIS
     3.1415...
     >>> compute_pairwise_angles(
     ...     ((1.0, -1.0), (0.0, 0.0), (0.0, 0.0)),
-    ...     True,
+    ...     ((1.0, -1.0), (0.0, 0.0), (0.0, 0.0)),
+    ...     closest_polarity=False,
+    ... )[0, 1]  # doctest: +ELLIPSIS
+    3.1415...
+    >>> compute_pairwise_angles(
+    ...     ((1.0, -1.0), (0.0, 0.0), (0.0, 0.0)),
     ... )[0, 1]
     0.0
 
@@ -393,12 +401,17 @@ def compute_pairwise_angles(
     .. [Andersson15] J. L. R. Andersson. et al., An integrated approach to
        correction for off-resonance effects and subject movement in diffusion MR
        imaging, NeuroImage 125 (2016) 1063–1078
+
     """
 
-    if np.shape(bvecs)[0] != 3:
-        raise ValueError(f"bvecs must be of shape (3, N). Found: {bvecs.shape}")
+    bvecs_X = gtab_X.bvecs.T
+    bvecs_X = np.array(bvecs_X) / np.linalg.norm(bvecs_X, axis=0)
 
-    # Ensure b-vectors are unit-norm
-    bvecs = np.array(bvecs) / np.linalg.norm(bvecs, axis=0)
-    cosines = np.clip(bvecs.T @ bvecs, -1.0, 1.0)
+    if gtab_Y is None:
+        bvecs_Y = bvecs_X
+    else:
+        bvecs_Y = gtab_Y.bvecs.T
+        bvecs_Y = np.array(bvecs_Y) / np.linalg.norm(bvecs_Y, axis=0)
+
+    cosines = np.clip(bvecs_X.T @ bvecs_Y, -1.0, 1.0)
     return np.arccos(np.abs(cosines) if closest_polarity else cosines)
