@@ -277,3 +277,128 @@ class GPFit:
 
         """
         return gp_prediction(self.fitted_gtab, gtab, self.model, mask=self.mask)
+
+
+def _ensure_positive_scale(
+    a: float,
+) -> None:
+    if a <= 0:
+        raise ValueError(f"a must be strictly positive. Provided: {a}")
+
+
+def compute_exponential_covariance(
+    theta: np.ndarray,
+    a: float,
+) -> np.ndarray:
+    r"""Compute the exponential covariance matrix following eq. 9 in [Andersson15]_.
+
+    .. math::
+
+        C(\theta) = \exp(- \frac{\theta}{a})
+
+    Parameters
+    ----------
+    theta : :obj:`~numpy.ndarray`
+        Pairwise angles across diffusion gradient encoding directions.
+    a : :obj:`float`
+        Positive scale parameter that here determines the "distance" at which θ
+        the covariance goes to zero.
+
+    Returns
+    -------
+    :obj:`~numpy.ndarray`
+        Exponential covariance function values.
+
+    """
+
+    _ensure_positive_scale(a)
+
+    return np.exp(-theta / a)
+
+
+def compute_spherical_covariance(
+    theta: np.ndarray,
+    a: float,
+) -> np.ndarray:
+    r"""Compute the spherical covariance matrix following eq. 10 in [Andersson15]_.
+
+    .. math::
+
+        C(\theta) = \begin{cases}
+            1 - \frac{3 \theta}{2 a} + \frac{\theta^3}{2 a^3} & \textnormal{if} \; \theta \leq a \\
+            0 & \textnormal{if} \; \theta > a
+        \end{cases}
+
+    Parameters
+    ----------
+    theta : :obj:`~numpy.ndarray`
+        Pairwise angles across diffusion gradient encoding directions.
+    a : :obj:`float`
+        Positive scale parameter that here determines the "distance" at which θ
+        the covariance goes to zero.
+
+    Returns
+    -------
+    :obj:`~numpy.ndarray`
+        Spherical covariance matrix.
+
+    """
+
+    _ensure_positive_scale(a)
+
+    return np.where(theta <= a, 1 - 3 * (theta / a) ** 2 + 2 * (theta / a) ** 3, 0)
+
+
+def compute_pairwise_angles(
+    bvecs: np.ndarray,
+    closest_polarity: bool = True,
+) -> np.ndarray:
+    r"""Compute pairwise angles across diffusion gradient encoding directions.
+
+    Following [Andersson15]_, it computes the smallest of the angles between
+    each pair if ``closest_polarity`` is ``True``, i.e.
+
+    .. math::
+
+        \theta(\mathbf{g}, \mathbf{g'}) = \arccos(\abs{\langle \mathbf{g}, \mathbf{g'} \rangle})
+
+    Parameters
+    ----------
+    bvecs : :obj:`~numpy.ndarray`
+        Diffusion gradient encoding directions in FSL format.
+    closest_polarity : :obj:`bool`
+        ``True`` to consider the smallest of the two angles between the crossing
+         lines resulting from reversing each vector pair.
+
+    Returns
+    -------
+    :obj:`~numpy.ndarray`
+        Pairwise angles across diffusion gradient encoding directions.
+
+    Examples
+    --------
+    >>> compute_pairwise_angles(
+    ...     ((1.0, -1.0), (0.0, 0.0), (0.0, 0.0)),
+    ...     False,
+    ... )[0, 1]  # doctest: +ELLIPSIS
+    3.1415...
+    >>> compute_pairwise_angles(
+    ...     ((1.0, -1.0), (0.0, 0.0), (0.0, 0.0)),
+    ...     True,
+    ... )[0, 1]
+    0.0
+
+    References
+    ----------
+    .. [Andersson15] J. L. R. Andersson. et al., An integrated approach to
+       correction for off-resonance effects and subject movement in diffusion MR
+       imaging, NeuroImage 125 (2016) 1063–1078
+    """
+
+    if np.shape(bvecs)[0] != 3:
+        raise ValueError(f"bvecs must be of shape (3, N). Found: {bvecs.shape}")
+
+    # Ensure b-vectors are unit-norm
+    bvecs = np.array(bvecs) / np.linalg.norm(bvecs, axis=0)
+    cosines = np.clip(bvecs.T @ bvecs, -1.0, 1.0)
+    return np.arccos(np.abs(cosines) if closest_polarity else cosines)
